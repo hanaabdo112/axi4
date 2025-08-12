@@ -36,11 +36,25 @@ interface axi4_if #(
     logic                  RREADY;
 
 
-    modport master (input ACLK, AWREADY, WREADY, BRESP, BVALID, ARREADY, RDATA, RRESP, RVALID, RLAST,
-                    output ARESETn, AWADDR, AWLEN, AWSIZE, AWVALID, WDATA, WVALID, WLAST, BREADY, ARADDR, ARLEN, ARSIZE, ARVALID, RREADY);
+    // Testbench drives requests; design provides responses
+    modport tb_mp (
+        input  ACLK, AWREADY, WREADY, BRESP, BVALID, ARREADY, RDATA, RRESP, RVALID, RLAST,
+        output ARESETn, AWADDR, AWLEN, AWSIZE, AWVALID, WDATA, WVALID, WLAST, BREADY, ARADDR, ARLEN, ARSIZE, ARVALID, RREADY
+    );
 
-    modport slave(input ACLK, ARESETn, AWADDR, AWLEN, AWSIZE, AWVALID, WDATA, WVALID, WLAST, BREADY, ARADDR, ARLEN, ARSIZE, ARVALID, RREADY,
-                  output AWREADY, WREADY, BRESP, BVALID, ARREADY, RDATA, RRESP, RVALID, RLAST);
+    modport design_mp (
+        input  ACLK, ARESETn, AWADDR, AWLEN, AWSIZE, AWVALID, WDATA, WVALID, WLAST, BREADY, ARADDR, ARLEN, ARSIZE, ARVALID, RREADY,
+        output AWREADY, WREADY, BRESP, BVALID, ARREADY, RDATA, RRESP, RVALID, RLAST
+    );
 
-    
-endinterface //interfacename
+    // Assertions only observe
+    modport assert_mp (
+        input ACLK, ARESETn,
+              AWADDR, AWLEN, AWSIZE, AWVALID, AWREADY,
+              WDATA, WVALID, WLAST, WREADY,
+              BRESP, BVALID, BREADY,
+              ARADDR, ARLEN, ARSIZE, ARVALID, ARREADY,
+              RDATA, RRESP, RVALID, RLAST, RREADY
+    );
+
+endinterface // axi4_if
