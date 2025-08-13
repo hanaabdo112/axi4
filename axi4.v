@@ -3,40 +3,7 @@ module axi4 #(
     parameter ADDR_WIDTH = 16,
     parameter MEMORY_DEPTH = 1024
 )(
-    input  wire                     ACLK,
-    input  wire                     ARESETn,
-
-    // Write address channel
-    input  wire [ADDR_WIDTH-1:0]    AWADDR,
-    input  wire [7:0]               AWLEN,
-    input  wire [2:0]               AWSIZE,
-    input  wire                     AWVALID,
-    output reg                      AWREADY,
-
-    // Write data channel
-    input  wire [DATA_WIDTH-1:0]    WDATA,
-    input  wire                     WVALID,
-    input  wire                     WLAST,
-    output reg                      WREADY,
-
-    // Write response channel
-    output reg [1:0]                BRESP,
-    output reg                      BVALID,
-    input  wire                     BREADY,
-
-    // Read address channel
-    input  wire [ADDR_WIDTH-1:0]    ARADDR,
-    input  wire [7:0]               ARLEN,
-    input  wire [2:0]               ARSIZE,
-    input  wire                     ARVALID,
-    output reg                      ARREADY,
-
-    // Read data channel
-    output reg [DATA_WIDTH-1:0]     RDATA,
-    output reg [1:0]                RRESP,
-    output reg                      RVALID,
-    output reg                      RLAST,
-    input  wire                     RREADY
+    axi4_if.dut_mp axi
 );
 
 
@@ -61,12 +28,12 @@ module axi4 #(
     assign  read_addr_incr  = (1 << read_size);
     
     // Address boundary check (4KB boundary = 12 bits)
-    assign write_boundary_cross = ((write_addr & 12'hFFF) + (write_burst_len << write_size)) > 12'hFFF;
-    assign read_boundary_cross = ((read_addr & 12'hFFF) + (read_burst_len << read_size)) > 12'hFFF;
+    wire write_boundary_cross = ((write_addr & 12'hFFF) + (write_burst_len << write_size)) > 12'hFFF;
+    wire read_boundary_cross = ((read_addr & 12'hFFF) + (read_burst_len << read_size)) > 12'hFFF;
     
     // Address range check
-    assign write_addr_valid = (write_addr >> 2) < MEMORY_DEPTH;
-    assign read_addr_valid = (read_addr >> 2) < MEMORY_DEPTH;
+    wire write_addr_valid = (write_addr >> 2) < MEMORY_DEPTH;
+    wire read_addr_valid = (read_addr >> 2) < MEMORY_DEPTH;
 
     // Memory instance
     axi4_memory #(
@@ -74,8 +41,8 @@ module axi4 #(
         .ADDR_WIDTH($clog2(MEMORY_DEPTH)),
         .DEPTH(MEMORY_DEPTH)
     ) mem_inst (
-        .clk(ACLK),
-        .rst_n(ARESETn),
+        .clk(axi.ACLK),
+        .rst_n(axi.ARESETn),
         .mem_en(mem_en),
         .mem_we(mem_we),
         .mem_addr(mem_addr),
@@ -98,19 +65,19 @@ module axi4 #(
     // Registered memory read data for timing
     reg [DATA_WIDTH-1:0] mem_rdata_reg;
 
-    always @(posedge ACLK or negedge ARESETn) begin
-        if (!ARESETn) begin
+    always @(posedge axi.ACLK or negedge axi.ARESETn) begin
+        if (!axi.ARESETn) begin
             // Reset all outputs
-            AWREADY <= 1'b1;  // Ready to accept address
-            WREADY <= 1'b0;
-            BVALID <= 1'b0;
-            BRESP <= 2'b00;
+            axi.AWREADY <= 1'b1;  // Ready to accept address
+            axi.WREADY <= 1'b0;
+            axi.BVALID <= 1'b0;
+            axi.BRESP <= 2'b00;
             
-            ARREADY <= 1'b1;  // Ready to accept address
-            RVALID <= 1'b0;
-            RRESP <= 2'b00;
-            RDATA <= {DATA_WIDTH{1'b0}};
-            RLAST <= 1'b0;
+            axi.ARREADY <= 1'b1;  // Ready to accept address
+            axi.RVALID <= 1'b0;
+            axi.RRESP <= 2'b00;
+            axi.RDATA <= {DATA_WIDTH{1'b0}};
+            axi.RLAST <= 1'b0;
             
             // Reset internal state
             write_state <= W_IDLE;
@@ -142,51 +109,51 @@ module axi4 #(
             // --------------------------
             case (write_state)
                 W_IDLE: begin
-                    AWREADY <= 1'b1;
-                    WREADY <= 1'b0;
-                    BVALID <= 1'b0;
+                    axi.AWREADY <= 1'b1;
+                    axi.WREADY <= 1'b0;
+                    axi.BVALID <= 1'b0;
                     
-                    if (AWVALID && AWREADY) begin
+                    if (axi.AWVALID && axi.AWREADY) begin
                         // Capture address phase information
-                        write_addr <= AWADDR;
-                        write_burst_len <= AWLEN;
-                        write_burst_cnt <= AWLEN;
-                        write_size <= AWSIZE;
+                        write_addr <= axi.AWADDR;
+                        write_burst_len <= axi.AWLEN;
+                        write_burst_cnt <= axi.AWLEN;
+                        write_size <= axi.AWSIZE;
                         
-                        AWREADY <= 1'b0;
+                        axi.AWREADY <= 1'b0;
                         write_state <= W_ADDR;
                     end
                 end
                 
                 W_ADDR: begin
                     // Transition to data phase
-                    WREADY <= 1'b1;
+                    axi.WREADY <= 1'b1;
                     write_state <= W_DATA;
                 end
                 
                 W_DATA: begin
-                    if (WVALID && WREADY) begin
+                    if (axi.WVALID && axi.WREADY) begin
                         // Check if address is valid
                         if (write_addr_valid && !write_boundary_cross) begin
                             // Perform write operation
                             mem_en <= 1'b1;
                             mem_we <= 1'b1;
                             mem_addr <= write_addr >> 2;  // Convert to word address
-                            mem_wdata <= WDATA;
+                            mem_wdata <= axi.WDATA;
                         end
                         
                         // Check for last transfer
-                        if (WLAST || write_burst_cnt == 0) begin
-                            WREADY <= 1'b0;
+                        if (axi.WLAST || write_burst_cnt == 0) begin
+                            axi.WREADY <= 1'b0;
                             write_state <= W_RESP;
                             
                             // Set response - delayed until write completion
                             if (!write_addr_valid || write_boundary_cross) begin
-                                BRESP <= 2'b10;  // SLVERR
+                                axi.BRESP <= 2'b10;  // SLVERR
                             end else begin
-                                BRESP <= 2'b00;  // OKAY
+                                axi.BRESP <= 2'b00;  // OKAY
                             end
-                            BVALID <= 1'b1;
+                            axi.BVALID <= 1'b1;
                         end else begin
                             // Continue burst - increment address
                             write_addr <= write_addr + write_addr_incr;
@@ -196,14 +163,10 @@ module axi4 #(
                 end
                 
                 W_RESP: begin
-                    if (BREADY && BVALID) begin
-                        BVALID <= 1'b0;
-                        BRESP <= 2'b00;
-                        write_state <= W_IDLE;
+                    if (axi.BREADY && axi.BVALID) begin
+                        axi.BVALID <= 1'b0;
                     end
                 end
-                
-                default: write_state <= W_IDLE;
             endcase
 
             // --------------------------
@@ -211,70 +174,183 @@ module axi4 #(
             // --------------------------
             case (read_state)
                 R_IDLE: begin
-                    ARREADY <= 1'b1;
-                    RVALID <= 1'b0;
-                    RLAST <= 1'b0;
+                    axi.ARREADY <= 1'b1;
+                    axi.RVALID <= 1'b0;
+                    axi.RLAST <= 1'b0;
                     
-                    if (ARVALID && ARREADY) begin
-                        // Capture address phase information
-                        read_addr <= ARADDR;
-                        read_burst_len <= ARLEN;
-                        read_burst_cnt <= ARLEN;
-                        read_size <= ARSIZE;
+                    if (axi.ARVALID && axi.ARREADY) begin
+                        // Capture read address phase information
+                        read_addr <= axi.ARADDR;
+                        read_burst_len <= axi.ARLEN;
+                        read_burst_cnt <= axi.ARLEN;
+                        read_size <= axi.ARSIZE;
                         
-                        ARREADY <= 1'b0;
+                        axi.ARREADY <= 1'b0;
                         read_state <= R_ADDR;
                     end
                 end
                 
                 R_ADDR: begin
-                    // Start first read
-                    if (read_addr_valid && !read_boundary_cross) begin
-                        mem_en <= 1'b1;
-                        mem_addr <= read_addr >> 2;  // Convert to word address
-                    end
+                    // Transition to data phase
+                    axi.RVALID <= 1'b1;
                     read_state <= R_DATA;
                 end
                 
                 R_DATA: begin
-                    // Present read data
-                    if (read_addr_valid && !read_boundary_cross) begin
-                        RDATA <= mem_rdata;
-                        RRESP <= 2'b00;  // OKAY
-                    end else begin
-                        RDATA <= {DATA_WIDTH{1'b0}};
-                        RRESP <= 2'b10;  // SLVERR
-                    end
-                    
-                    RVALID <= 1'b1;
-                    RLAST <= (read_burst_cnt == 0);
-                    
-                    if (RREADY && RVALID) begin
-                        RVALID <= 1'b0;
-                        
-                        if (read_burst_cnt > 0) begin
-                            // Continue burst
+                    if (axi.RVALID && axi.RREADY) begin
+                        // Check if address is valid
+                        if (read_addr_valid && !read_boundary_cross) begin
+                            // Read operation
+                            mem_en <= 1'b1;
+                            mem_we <= 1'b0;
+                            mem_addr <= read_addr >> 2;  // Convert to word address
+                            mem_rdata_reg <= mem_rdata;
+                            axi.RDATA <= mem_rdata_reg;
+                            axi.RRESP <= 2'b00;  // OKAY
+                        end else begin
+                            axi.RDATA <= {DATA_WIDTH{1'b0}};
+                            axi.RRESP <= 2'b10;  // SLVERR
+                        end
+
+                        // Check for last transfer
+                        if (read_burst_cnt == 0) begin
+                            axi.RLAST <= 1'b1;
+                            // End of burst
+                            if (axi.RVALID && axi.RREADY) begin
+                                axi.RVALID <= 1'b0;
+                                axi.RLAST <= 1'b0;
+                                read_state <= R_IDLE;
+                            end
+                        end else begin
+                            // Continue burst - increment address
                             read_addr <= read_addr + read_addr_incr;
                             read_burst_cnt <= read_burst_cnt - 1'b1;
-                            
-                            // Start next read
-                            if (read_addr_valid && !read_boundary_cross) begin
-                                mem_en <= 1'b1;
-                                mem_addr <= (read_addr + read_addr_incr) >> 2;
-                            end
-                            
-                            // Stay in R_DATA for next transfer
-                        end else begin
-                            // End of burst
-                            RLAST <= 1'b0;
-                            read_state <= R_IDLE;
                         end
                     end
                 end
-                
-                default: read_state <= R_IDLE;
             endcase
         end
     end
+
+`ifndef SYNTHESIS
+    // Inline SystemVerilog Assertions (SVA)
+    default clocking cb @ (posedge axi.ACLK); endclocking
+    default disable iff (!axi.ARESETn);
+
+    // Handshake sequences
+    sequence aw_hs; axi.AWVALID && axi.AWREADY; endsequence
+    sequence w_hs;  axi.WVALID && axi.WREADY;  endsequence
+    sequence ar_hs; axi.ARVALID && axi.ARREADY; endsequence
+    sequence r_hs;  axi.RVALID && axi.RREADY;  endsequence
+
+    // Control must stay stable and VALID held until READY
+    property aw_stable_until_ready;
+        axi.AWVALID && !axi.AWREADY |=> $stable(axi.AWADDR) && $stable(axi.AWLEN) && $stable(axi.AWSIZE) && axi.AWVALID;
+    endproperty
+    assert_aw_stable_until_ready: assert property (aw_stable_until_ready);
+
+    property ar_stable_until_ready;
+        axi.ARVALID && !axi.ARREADY |=> $stable(axi.ARADDR) && $stable(axi.ARLEN) && $stable(axi.ARSIZE) && axi.ARVALID;
+    endproperty
+    assert_ar_stable_until_ready: assert property (ar_stable_until_ready);
+
+    property w_stable_until_ready;
+        axi.WVALID && !axi.WREADY |=> $stable(axi.WDATA) && $stable(axi.WLAST) && axi.WVALID;
+    endproperty
+    assert_w_stable_until_ready: assert property (w_stable_until_ready);
+
+    // VALID should deassert after address handshake (for this simple design)
+    property awvalid_low_after_handshake;
+        aw_hs |=> !axi.AWVALID;
+    endproperty
+    assert_awvalid_low_after_handshake: assert property (awvalid_low_after_handshake);
+
+    // Response channels must hold until handshake
+    property b_hold_until_ready;
+        axi.BVALID && !axi.BREADY |=> $stable(axi.BRESP) && axi.BVALID;
+    endproperty
+    assert_b_hold_until_ready: assert property (b_hold_until_ready);
+
+    property r_hold_until_ready;
+        axi.RVALID && !axi.RREADY |=> $stable(axi.RDATA) && $stable(axi.RRESP) && $stable(axi.RLAST) && axi.RVALID;
+    endproperty
+    assert_r_hold_until_ready: assert property (r_hold_until_ready);
+
+    // 4KB boundary must not be crossed by a burst (AXI rule)
+    property no_4kb_boundary_cross_on_aw;
+        aw_hs |-> (((axi.AWADDR & 12'hFFF) + (axi.AWLEN << axi.AWSIZE)) <= 12'hFFF);
+    endproperty
+    assert_no_4kb_boundary_cross_on_aw: assert property (no_4kb_boundary_cross_on_aw);
+
+    // Simple burst trackers for WLAST/RLAST placement
+    int unsigned w_beats_left;
+    bit          w_active;
+    int unsigned r_beats_left;
+    bit          r_active;
+
+    always_ff @(posedge axi.ACLK or negedge axi.ARESETn) begin
+        if (!axi.ARESETn) begin
+            w_active     <= 1'b0;
+            w_beats_left <= '0;
+        end else begin
+            if (aw_hs) begin
+                w_active     <= 1'b1;
+                w_beats_left <= axi.AWLEN; // beats left after current (AWLEN is beats-1)
+            end
+            if (w_hs && w_active) begin
+                if (w_beats_left == 0) begin
+                    w_active <= 1'b0;
+                end else begin
+                    w_beats_left <= w_beats_left - 1;
+                end
+            end
+        end
+    end
+
+    property wlast_only_on_final_beat;
+        (w_hs && w_active && (w_beats_left != 0)) |-> !axi.WLAST;
+    endproperty
+    assert_wlast_only_on_final_beat: assert property (wlast_only_on_final_beat);
+
+    property wlast_on_final_beat;
+        (w_hs && w_active && (w_beats_left == 0)) |-> axi.WLAST;
+    endproperty
+    assert_wlast_on_final_beat: assert property (wlast_on_final_beat);
+
+    always_ff @(posedge axi.ACLK or negedge axi.ARESETn) begin
+        if (!axi.ARESETn) begin
+            r_active     <= 1'b0;
+            r_beats_left <= '0;
+        end else begin
+            if (ar_hs) begin
+                r_active     <= 1'b1;
+                r_beats_left <= axi.ARLEN; // beats left after current (ARLEN is beats-1)
+            end
+            if (r_hs && r_active) begin
+                if (r_beats_left == 0) begin
+                    r_active <= 1'b0;
+                end else begin
+                    r_beats_left <= r_beats_left - 1;
+                end
+            end
+        end
+    end
+
+    property rlast_only_on_final_beat;
+        (r_hs && r_active && (r_beats_left != 0)) |-> !axi.RLAST;
+    endproperty
+    assert_rlast_only_on_final_beat: assert property (rlast_only_on_final_beat);
+
+    property rlast_on_final_beat;
+        (r_hs && r_active && (r_beats_left == 0)) |-> axi.RLAST;
+    endproperty
+    assert_rlast_on_final_beat: assert property (rlast_on_final_beat);
+
+    // Lightweight covers to aid GUI visibility
+    cover_aw_handshake: cover property (aw_hs);
+    cover_ar_handshake: cover property (ar_hs);
+    cover_b_handshake:  cover property (axi.BVALID && axi.BREADY);
+    cover_r_handshake:  cover property (r_hs);
+`endif
 
 endmodule
